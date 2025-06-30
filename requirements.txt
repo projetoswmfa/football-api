@@ -1,0 +1,28 @@
+# ===============================================
+# SPORTS DATA API - REQUIREMENTS ESSENCIAIS
+# ===============================================
+
+# Core FastAPI (versões estáveis para Python 3.13)
+fastapi
+uvicorn[standard]
+python-multipart
+
+# Database essencial
+supabase
+
+# AI essencial
+google-generativeai
+
+# Configuração essencial
+python-dotenv
+
+# Logging essencial
+loguru
+rich
+
+# HTTP essencial
+requests
+httpx
+
+# Background tasks essencial
+apscheduler 
