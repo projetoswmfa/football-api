@@ -277,7 +277,7 @@ class AnalyticsRequest(BaseModel):
     """Request para análise do Gemini"""
     analysis_type: GeminiAnalysisType
     entity_id: int
-    entity_type: str = Field(..., regex="^(match|team|player)$")
+    entity_type: str = Field(..., pattern="^(match|team|player)$")
     custom_prompt: Optional[str] = None
     include_recent_data: bool = True
 
@@ -288,4 +288,4 @@ class MatchPredictionRequest(BaseModel):
     include_team_form: bool = True
     include_head_to_head: bool = True
     include_player_conditions: bool = True
-    analysis_depth: str = Field("standard", regex="^(basic|standard|detailed)$") 
+    analysis_depth: str = Field("standard", pattern="^(basic|standard|detailed)$") 

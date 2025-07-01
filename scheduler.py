@@ -9,7 +9,7 @@ from typing import Dict, Any
 
 from config import settings
 from scrapers.sofascore_scraper import scrape_live_matches
-from scrapers.transfermarkt_scraper import scrape_teams_by_league
+from scrapers.transfermarkt_scraper import scrape_transfermarkt_teams
 from database import db_manager
 
 
@@ -222,12 +222,11 @@ class SchedulerManager:
             for league in settings.leagues:
                 try:
                     logger.info(f"Fazendo scraping da liga: {league}")
-                    results = await scrape_teams_by_league(league, max_teams=3)
+                    players_count = await scrape_transfermarkt_teams([league])
                     
-                    teams_count = len([r for r in results if r['team'] is not None])
-                    total_teams += teams_count
+                    total_teams += 1 if players_count > 0 else 0  # Contar como 1 time se encontrou jogadores
                     
-                    logger.info(f"Liga {league}: {teams_count} times processados")
+                    logger.info(f"Liga {league}: {players_count} jogadores processados")
                     
                     # Delay entre ligas para evitar rate limiting
                     await asyncio.sleep(60)

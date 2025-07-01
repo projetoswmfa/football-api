@@ -9,10 +9,11 @@ from typing import List, Dict, Any, Optional
 from datetime import datetime, timezone
 import logging
 from urllib.parse import urljoin
+import time
 
 logger = logging.getLogger(__name__)
 
-class SofascoreScraper:
+class SofaScoreRealScraper:
     """Scraper robusto para dados reais do SofaScore"""
     
     def __init__(self):
@@ -39,7 +40,7 @@ class SofascoreScraper:
             timeout=timeout
         )
         
-        logger.info("🔥 SofaScore scraper iniciado - DADOS REAIS")
+        logger.info("🔥 SofaScore scraper iniciado - conectado à API real")
         return self
     
     async def __aexit__(self, exc_type, exc_val, exc_tb):
@@ -48,12 +49,8 @@ class SofascoreScraper:
             await self.session.close()
             logger.info("🔒 SofaScore scraper encerrado")
     
-    async def _make_request(self, endpoint: str, params: Optional[Dict] = None) -> Optional[Dict]:
+    async def _make_request(self, endpoint: str, params: Dict = None) -> Optional[Dict]:
         """Faz requisição com retry e rate limiting"""
-        if not self.session:
-            logger.error("❌ Sessão não inicializada")
-            return None
-            
         url = urljoin(self.base_url, endpoint)
         
         for attempt in range(self.max_retries):
@@ -67,7 +64,7 @@ class SofascoreScraper:
                         return data
                     
                     elif response.status == 429:  # Rate limit
-                        retry_after = int(response.headers.get('Retry-After', '60'))
+                        retry_after = int(response.headers.get('Retry-After', 60))
                         logger.warning(f"⚠️ Rate limit - aguardando {retry_after}s")
                         await asyncio.sleep(retry_after)
                         continue
@@ -89,11 +86,11 @@ class SofascoreScraper:
         return None
     
     async def get_live_matches(self) -> List[Dict[str, Any]]:
-        """🔴 PARTIDAS AO VIVO - DADOS REAIS EM TEMPO REAL"""
+        """🔴 PARTIDAS AO VIVO - Dados reais em tempo real"""
         try:
-            logger.info("🔍 Buscando partidas ao vivo REAIS...")
+            logger.info("🔍 Buscando partidas ao vivo...")
             
-            # Endpoint para partidas ao vivo do SofaScore
+            # Endpoint para partidas ao vivo
             data = await self._make_request("/sport/football/events/live")
             
             if not data or 'events' not in data:
@@ -113,7 +110,7 @@ class SofascoreScraper:
                     logger.error(f"❌ Erro ao processar partida {event.get('id')}: {e}")
                     continue
             
-            logger.info(f"🎉 {len(live_matches)} partidas ao vivo REAIS processadas")
+            logger.info(f"🎉 {len(live_matches)} partidas ao vivo processadas")
             return live_matches
             
         except Exception as e:
@@ -121,7 +118,7 @@ class SofascoreScraper:
             return []
     
     async def _parse_live_match(self, event: Dict) -> Optional[Dict[str, Any]]:
-        """Processa dados de uma partida ao vivo REAL"""
+        """Processa dados de uma partida ao vivo"""
         try:
             # Informações básicas
             match_id = event.get('id')
@@ -153,8 +150,8 @@ class SofascoreScraper:
                 start_time = datetime.fromtimestamp(start_timestamp, tz=timezone.utc)
             
             match_data = {
-                'match_id': f"sofascore_{match_id}",
                 'id': match_id,
+                'external_id': f"sofascore_{match_id}",
                 'home_team': home_team.get('name', 'Unknown'),
                 'away_team': away_team.get('name', 'Unknown'),
                 'home_team_id': home_team.get('id'),
@@ -166,7 +163,7 @@ class SofascoreScraper:
                 'competition': competition,
                 'country': country,
                 'start_time': start_time.isoformat() if start_time else None,
-                'is_live': match_status.lower() in ['live', '1st half', '2nd half', 'halftime', 'inplay'],
+                'is_live': match_status.lower() in ['live', '1st half', '2nd half', 'halftime'],
                 'scraped_at': datetime.now(tz=timezone.utc).isoformat(),
                 'source': 'sofascore_real'
             }
@@ -205,7 +202,7 @@ class SofascoreScraper:
                             home_value = item.get('homeValue', 0)
                             away_value = item.get('awayValue', 0)
                             
-                            # Mapear estatísticas importantes para apostas
+                            # Mapear estatísticas importantes
                             if 'possession' in name:
                                 details['home_possession'] = self._safe_int(home_value)
                                 details['away_possession'] = self._safe_int(away_value)
@@ -221,50 +218,12 @@ class SofascoreScraper:
                             elif 'yellow card' in name:
                                 details['home_yellow_cards'] = self._safe_int(home_value)
                                 details['away_yellow_cards'] = self._safe_int(away_value)
-                            
-                            elif 'red card' in name:
-                                details['home_red_cards'] = self._safe_int(home_value)
-                                details['away_red_cards'] = self._safe_int(away_value)
-            
-            # Buscar odds se disponível
-            odds_data = await self._make_request(f"/event/{match_id}/odds/1/all")
-            if odds_data and 'markets' in odds_data:
-                odds_info = self._parse_odds(odds_data['markets'])
-                details.update(odds_info)
             
             return details
             
         except Exception as e:
             logger.error(f"❌ Erro ao buscar detalhes da partida {match_id}: {e}")
             return {}
-    
-    def _parse_odds(self, markets: List[Dict]) -> Dict:
-        """Extrai odds das casas de apostas"""
-        odds_info = {}
-        
-        try:
-            for market in markets:
-                market_name = market.get('marketName', '').lower()
-                
-                if '1x2' in market_name or 'match winner' in market_name:
-                    choices = market.get('choices', [])
-                    
-                    for choice in choices:
-                        name = choice.get('name', '').lower()
-                        fractional_value = choice.get('fractionalValue')
-                        
-                        if fractional_value:
-                            if '1' in name or 'home' in name:
-                                odds_info['odds_home'] = round(float(fractional_value), 2)
-                            elif 'x' in name or 'draw' in name:
-                                odds_info['odds_draw'] = round(float(fractional_value), 2)
-                            elif '2' in name or 'away' in name:
-                                odds_info['odds_away'] = round(float(fractional_value), 2)
-        
-        except Exception as e:
-            logger.error(f"❌ Erro ao processar odds: {e}")
-        
-        return odds_info
     
     def _safe_int(self, value) -> int:
         """Converte valor para int de forma segura"""
@@ -275,18 +234,40 @@ class SofascoreScraper:
         except (ValueError, TypeError):
             return 0
 
-async def scrape_live_matches():
-    """Função principal para scraping do Sofascore"""
+
+# 🚀 FUNÇÃO PRINCIPAL PARA SCRAPING AO VIVO
+async def scrape_live_matches_real() -> List[Dict[str, Any]]:
+    """Função principal para scraping de dados reais ao vivo"""
     try:
-        async with SofascoreScraper() as scraper:
-            matches = await scraper.get_live_matches()
-            logger.info(f"✅ {len(matches)} partidas ao vivo encontradas")
-            return matches
+        async with SofaScoreRealScraper() as scraper:
+            live_matches = await scraper.get_live_matches()
+            
+            logger.info(f"🔥 SCRAPING REAL CONCLUÍDO: {len(live_matches)} partidas ao vivo")
+            
+            if live_matches:
+                countries = set(match.get('country', 'Unknown') for match in live_matches)
+                competitions = set(match.get('competition', 'Unknown') for match in live_matches)
+                
+                logger.info(f"🌍 Países: {', '.join(countries)}")
+                logger.info(f"🏆 Competições: {', '.join(competitions)}")
+            
+            return live_matches
             
     except Exception as e:
-        logger.error(f"Erro no scraping do Sofascore: {e}")
+        logger.error(f"❌ ERRO CRÍTICO no scraping real: {e}")
         return []
 
 # Para execução direta
 if __name__ == "__main__":
-    asyncio.run(scrape_live_matches()) 
+    async def test_scraper():
+        print("🔥 TESTANDO SCRAPER REAL DO SOFASCORE")
+        print("=" * 50)
+        
+        live = await scrape_live_matches_real()
+        print(f"🔴 Partidas ao vivo: {len(live)}")
+        
+        if live:
+            print("Exemplo:")
+            print(json.dumps(live[0], indent=2, ensure_ascii=False))
+    
+    asyncio.run(test_scraper()) 

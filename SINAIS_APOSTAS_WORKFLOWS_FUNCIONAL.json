@@ -1,0 +1,265 @@
+{
+  "name": "Sinais de Apostas - FUNCIONAL",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "*/5 * * * *"
+            }
+          ]
+        }
+      },
+      "id": "cron_sinais",
+      "name": "A cada 5 minutos",
+      "type": "n8n-nodes-base.cron",
+      "typeVersion": 1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "http://localhost:8000/matches/live",
+        "options": {}
+      },
+      "id": "http_matches",
+      "name": "Buscar Partidas",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "data_check",
+              "leftValue": "={{$json.data}}",
+              "rightValue": "",
+              "operator": {
+                "type": "array",
+                "operation": "notEmpty"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "if_matches",
+      "name": "Tem partidas?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      },
+      "id": "split_batch",
+      "name": "Cada partida",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:8000/betting/all-signals",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "match_id",
+              "value": "={{$json.id}}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "http_signals",
+      "name": "Gerar Sinais IA",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1120, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "const signals = $input.first().json.data?.signals || {};\nconst highConf = [];\n\nObject.keys(signals).forEach(type => {\n  const signal = signals[type];\n\n  // Filtro: apenas tipos específicos e confiança mínima >= 8\n  const tiposAceitos = ['corners', 'cards']; // adicione mais se quiser\n  const confiancaMinima = 8;\n\n  if (\n    signal &&\n    tiposAceitos.includes(signal.signal_type) &&\n    signal.confidence_level >= confiancaMinima\n  ) {\n    let emoji = signal.signal_type === 'corners'\n      ? '🚨 ESCANTEIO'\n      : signal.signal_type === 'cards'\n      ? '🟡 CARTÃO'\n      : '⚽ AMBAS MARCAM';\n\n    highConf.push({\n      type: signal.signal_type,\n      message: signal.telegram_message,\n      confidence: signal.confidence_level,\n      emoji: emoji\n    });\n  }\n});\n\n// Ordenar por confiança e manter só os 2 melhores\nhighConf.sort((a, b) => b.confidence - a.confidence);\nconst topSignals = highConf.slice(0, 2);\n\nreturn {\n  signals: topSignals,\n  has_signals: topSignals.length > 0,\n  count: topSignals.length,\n  max_confidence: topSignals.length > 0 ? Math.max(...topSignals.map(s => s.confidence)) : 0\n};"
+      },
+      "id": "function_filter",
+      "name": "Filtrar Confiança",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 2,
+      "position": [1340, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "signals_check",
+              "leftValue": "={{$json.has_signals}}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equal"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "if_signals",
+      "name": "Tem sinais?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1560, 300]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "msg",
+              "name": "telegram_message",
+              "value": "🤖 SINAIS AUTOMÁTICOS - CONFIANÇA ≥8\n\n{{$json.signals.map(s => `${s.emoji}\nCONFIANÇA: ${s.confidence}/10\n\n${s.message}`).join('\n\n═══════════════\n\n')}}\n\n⏰ {{$now.format('HH:mm')}} - Análise IA Gemini\n🎯 {{$json.count}} sinal(is) de alta qualidade\n📊 Máxima confiança: {{$json.max_confidence}}/10",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "set_message",
+      "name": "Formatar Mensagem",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3,
+      "position": [1780, 300]
+    },
+    {
+      "parameters": {
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "telegramApi",
+        "chatId": "-1001234567890",
+        "text": "={{$json.telegram_message}}",
+        "additionalFields": {}
+      },
+      "id": "telegram_send",
+      "name": "Enviar Telegram",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [2000, 300]
+    }
+  ],
+  "connections": {
+    "cron_sinais": {
+      "main": [
+        [
+          {
+            "node": "http_matches",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "http_matches": {
+      "main": [
+        [
+          {
+            "node": "if_matches",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "if_matches": {
+      "main": [
+        [
+          {
+            "node": "split_batch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "split_batch": {
+      "main": [
+        [
+          {
+            "node": "http_signals",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "http_signals": {
+      "main": [
+        [
+          {
+            "node": "function_filter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "function_filter": {
+      "main": [
+        [
+          {
+            "node": "if_signals",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "if_signals": {
+      "main": [
+        [
+          {
+            "node": "set_message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "set_message": {
+      "main": [
+        [
+          {
+            "node": "telegram_send",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 0,
+  "updatedAt": "2024-01-01T00:00:00.000Z",
+  "versionId": "1"
+} 
